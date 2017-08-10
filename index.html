@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+<meta charset="utf-8">
+	<title>D3 Watch Plot</title>
+	<script src="http://d3js.org/d3.v3.min.js"></script>
+	<script src="http://d3js.org/queue.v1.min.js"></script>
+	<script src="http://d3js.org/topojson.v1.min.js"></script>
+	<script src="https://code.jquery.com/jquery-1.12.4.js"></script> <!--10.2-->
+	<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+	<link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+	<link rel="stylesheet" href="./stylesheets/style.css"
+	<link rel="shortcut icon" href="">
+      
+</head>
+
+<body>
+
+	<form id='watch_type'>
+		<span>Watch Type   |</span>
+	  <div>
+	    <input type="radio" name="type" value="a" id="all" checked>
+	    <label for="all">All</label>
+	  </div>
+	  <div>
+	    <input type="radio" name="type" value="s" id="severe">
+	    <label for="severe">Severe</label>
+	  </div>
+	  <div style='position: absolute'>
+	    <input type="radio" name="type" value="t" id="tornado">
+	    <label for="tornado">Tornado</label>
+	  </div>
+	  <!-- <div id="log"></div> -->
+	</form>
+	<form id='options'>
+		<span> Map Options</span>
+	  <div>
+	  	<input type="radio" name="options" value="avg" id="avg" checked>
+	  	<label for="year">Annual Average</label>
+	  </div>
+	  <div>
+	  	<input type="radio" name="options" value="count" id="count">
+	  	<label for="year">Yearly Total (Use Slider to Right)</label>
+	  </div>
+	  <div>
+	  	<input type="radio" name="options" value="max" id="max">
+	  	<label for="max">Yearly Maximum</label>
+	  </div>
+	</form>
+
+	<!-- Kicks off JS to return map to center = [0,0] and zoom = 1 -->
+	<button type='button' id='button'>
+		Center Map
+	</button>
+
+
+	<script>
+
+		//Web Element Formatting Variables
+		//Create width and height variables based off window's size
+		var view_w = window.innerWidth;
+		var view_h = window.innerHeight;
+
+		var margin = {
+			top: 30,
+			bottom: 0,
+			left: 0,
+			right: 0
+		};
+
+		//Initial variables for chart interaction/updating
+		var set_max = false;
+		var centered;
+		var clicked_co = "Cleveland";
+		var curValue = 2016;
+		var year = 'avg';
+
+		//Initial watch type for the page (t = tor, s = svr, a = all)
+	    var type = 'a'
+		
+
+		//JQuery UI slider to update the years
+		var sliderCreate = function(event, ui) {
+    		//var curValue = initialValue;
+    		var tooltip = '<div class="sliderTip"><div class="sliderTip-inner">' + curValue + '</div><div class="sliderTip-arrow"></div></div>';
+
+    		$('.ui-slider-handle').html(tooltip);
+
+		};
+
+		var sliderSlide = function(event, ui) {
+
+			//Introduce curValue as a way to keep track of only numeric year values
+			//"year" variable can keep track of bother numeric and "avg" "max" etc.
+    		curValue = ui.value;
+    		year = ui.value;
+
+    		var tooltip = '<div class="sliderTip"><div class="sliderTip-inner">' + curValue + '</div><div class="sliderTip-arrow"></div></div>';
+
+    		$('.ui-slider-handle').html(tooltip);
+    		$('#count').prop('checked', true);
+
+    		update_map(curValue, type);
+    		push_chart_data(curValue);
+
+		};
+
+		//jQuery UI library used to create slider -- initialize the slider with .slider
+		$( function() {
+
+		    $( "#slider" ).slider({
+
+		    	min: 1970,
+		    	max: 2016,
+		    	value: 2016,
+		    	create: sliderCreate,
+		    	slide: sliderSlide
+		  
+		    });
+
+		    $("#slider").width(view_w/3)
+
+	  	});
+
+		//Append div for jquery slider -- a place for the slider
+	  	var slider_div = d3.select("body").append("div")
+	  		.attr("id", 'slider')
+
+		//Create svg and append it to body
+		var svg = d3.select("body").append("svg")
+			.attr("id", "chart")
+			.attr("width", view_w)
+			.attr("height", view_h);
+
+		//Create USA projection and put it in place on the page
+		var projection = d3.geo.albersUsa()
+	    	.scale(view_w*0.8)
+	    	.translate([view_w/6, view_h/2.5]);
+
+    	//Create path string based off projection (created above)
+    	var path = d3.geo.path()
+    		.projection(projection);
+
+    	//Create the g (group) element to contain the map and place it within the svg element
+    	var map = svg.append("g")
+			.classed("map", true)
+			.attr("transform", "translate(" + view_w/2 + "," + margin.top + ")");
+
+		//Create zoom function, zoom behavior variable, and call that variable on 'g' element in map to bind events
+		function zoom() {
+		  	g.attr("transform", "translate(" + d3.event.translate + ")scale(" + d3.event.scale + ")"); // + "translate(" + view_w/6 + "," + view_h/2  + ")");
+
+		  	//g.attr("scale(" + d3.event.scale + ")" + "translate(" + view_w/6 + "," + view_h/2  + ")");
+		}
+
+		//var zoomy = d3.behavior.zoom().on("zoom", zoom).scaleExtent([1,10]);
+
+		var g = map.append("g")
+				//.call(zoomy);
+
+		//Create linear color scales to fill map
+		var a_color = d3.scale.linear()
+	    				.domain([0,30])
+	    				.range(["#dcdcdc","#004d28"]);
+
+    	var t_color = d3.scale.linear()
+	    				.domain([0,20])
+	    				.range(["#dcdcdc","#67000d"]);
+
+	    var s_color = d3.scale.linear()
+	    				.domain([0,20])
+	    				.range(["#dcdcdc","#08306b"]);
+
+    	//Create window that shows county details when hovering
+	    var div = d3.select("body")
+	    			.append("div")
+	    			.attr("class", "tooltip")
+	    			.style("opacity", 0);
+
+	    
+		//Variable to maintain the active paired rate object. Set it to the "all watches" paired rates
+		var paired_rate = "year_a_pairedRates";
+
+	    //Objects to keep each new object created for new years that are run
+	    //This way, we don't have to create the year objects every time
+	    //{year:{FIPS:count}}
+	    var year_t_pairedRates = {};
+		var year_s_pairedRates = {};
+		var year_a_pairedRates = {};
+
+		//Similar objects but for holding FIPS/max year pairs
+		//{FIPS:year}
+		var year_mxmnt_pairedRates = {};
+		var year_mxmns_pairedRates = {};
+		var year_mxmna_pairedRates = {};
+
+		//Hold the max number of tor, svr, and all watches (with corresponding FIPS value)
+		//{FIPS:max_count}
+		var pair_maxt = {};
+		var pair_maxs = {};
+		var pair_maxa = {};
+
+	    //Function that calls the "ready" function (below) when d3.csv completes. Passes the parsed rows
+	    //from d3.csv as an argument to the callback (ready function)
+	    queue().defer(d3.csv, "annual_counts.csv").await(ready);
+
+	    //Object to hold the county names for each FIPS code
+	    //{FIPS:name}
+	    var pairNameWithId = {};
+
+	    //Object to hold the watch counts for each FIPS code during initial pairing (object then added to year_*_pairedRates))
+	    //{FIPS:name}
+	    var pair_a_RateWithId = {};
+		var pair_t_RateWithId = {};
+		var pair_s_RateWithId = {};
+
+
+		//Create global variable 'table' to hold counts data once it's read by d3.csv
+		var table;
+
+		
+		//Function to calculate the average tor and svr watches for each county (data entry)
+		function average(county) {
+
+			var tor_total = 0;
+			var svr_total = 0;
+
+			//e is each tor_key, county is passed from each row of table
+			tor_keys.forEach(function(e){
+				tor_total = parseInt(county[e]) + tor_total;
+			});
+
+			svr_keys.forEach(function(e){
+				svr_total = parseInt(county[e]) + svr_total;
+			});
+
+			var tor_avg = tor_total / tor_keys.length;
+			var svr_avg = svr_total / svr_keys.length;
+
+			return [tor_avg, svr_avg];
+
+		};
+
+		function max() {
+
+			table.forEach(function(d) {
+				var tor_by_county = {};
+				var svr_by_county = {};
+				var all_by_county = {};
+
+				//var tor_max_fin = {};
+				//var svr_max_fin = {};
+				//var all_max_fin = {};
+
+				tor_keys.forEach(function(i,k){
+
+					//'t_yyyy' is the format of the tor_keys so substring(2,6) gives 'yyyy'
+					var year = i.substring(2,6);
+					tor_by_county[parseInt(d[i])] = year;
+					svr_by_county[parseInt(d[svr_keys[k]])] = year;
+					all_by_county[parseInt(d[i]) + parseInt(d[svr_keys[k]])] = year;
+
+				});
+
+				//The keys are the watch totals. So create an array from the keys and find the max
+				var tor_holder = Math.max.apply(null, Object.keys(tor_by_county));
+
+				//Then get the value (year) paired with this max
+				var tor_year_holder = tor_by_county[tor_holder];
+
+				var svr_holder = Math.max.apply(null,Object.keys(svr_by_county));
+				var svr_year_holder = svr_by_county[svr_holder];
+
+				var all_holder = Math.max.apply(null,Object.keys(all_by_county));
+				var all_year_holder = all_by_county[all_holder];
+
+				pair_maxt[d.id] = tor_holder;
+				pair_maxs[d.id] = svr_holder;
+				pair_maxa[d.id] = all_holder;
+
+				year_mxmnt_pairedRates[d.id] = tor_year_holder;
+				year_mxmns_pairedRates[d.id] = svr_year_holder;
+				year_mxmna_pairedRates[d.id] = all_year_holder;
+
+			});
+
+			year_t_pairedRates['max'] = pair_maxt;
+			year_t_pairedRates['max_year'] = year_mxmnt_pairedRates;
+
+			year_s_pairedRates['max'] = pair_maxs;
+			year_s_pairedRates['max_year'] = year_mxmns_pairedRates;
+
+			year_a_pairedRates['max'] = pair_maxa;
+			year_a_pairedRates['max_year'] = year_mxmna_pairedRates;
+
+
+		};
+
+
+	    function ready(error, counts) {
+
+	    	//Hang onto data for later so we don't have to load the main csv file every time
+	    	table = counts;
+
+	    	//Run the following once (on a random table entry) to get the keys for svr and tor watches -- use to calculate averages via average function above
+	    	svr_keys = Object.keys(table['0']).filter(function(k) {
+
+	    						//indexOf returns 0 if enumerated element of array (keys) starts with 's_'
+	    						//if enumerated element starts with 's_' then, it passes filter function test
+			    		   		return k.indexOf('s_') == 0;
+						   });
+
+			tor_keys = Object.keys(table['0']).filter(function(k) {
+			    		   		return k.indexOf('t_') == 0;
+						   });
+
+			table.forEach(function(d) {
+				
+				//Initial pairing of county names with FIPS codes
+				pairNameWithId[d.id] = d.name;
+				var averages = average(d);
+
+				//Create initial pairing of average tornado watches per year with FIPS codes
+				pair_t_RateWithId[d.id] = Math.round(averages[0]);
+				
+				//Create initial pairing of average severe watches per year with FIPS codes
+				//pair_s_RateWithId[d.id] = +d['s_avg'];
+				pair_s_RateWithId[d.id] = Math.round(averages[1]);
+
+				//Create initial pairing of average all watches per year with FIPS codes
+				//pair_a_RateWithId[d.id] = +d['a_avg'];
+				pair_a_RateWithId[d.id] = Math.round(averages[0] + averages[1]);
+
+			});
+
+			//Add tor,svr,all to a master dict that holds average and yearly info once it's run
+			//This way, we create a dict for each year only once and on demand
+			year_t_pairedRates['avg'] = pair_t_RateWithId;
+			year_s_pairedRates['avg'] = pair_s_RateWithId;
+			year_a_pairedRates['avg'] = pair_a_RateWithId;
+
+			//Run max function to get max values and associated years
+			max();
+
+			//Use d3's method to read json and pass the json data as an argument ("us") to callback function
+			d3.json("./us_new2.json", function(error, us) {
+		    	if (error) throw error;
+		    		
+		    	g.append("g")
+		    		.attr("id", "counties")
+		    		.selectAll("path")			//path elements don't exist yet, create "empty selection"
+		    		.data(topojson.feature(us, us.objects.counties).features)	//Join empty selection to map data
+		    									//The following lines are executed once for each of the features in the //data
+		    		.enter().append("path")		//Bind unbound data to paths
+		    		.attr("id", "fills")
+		    		.attr("d", path)			//"d" attr is a string containing a series of path descriptions
+		    									//So we give each new path elements the projection data
+		    		.on("click", function (d) {
+		    			clicked(d);
+		    			FIPS = d.id;
+		    			
+		    			//Set county to proper name
+		    			clicked_co = pairNameWithId[d.id];
+
+		    			//Check if max year is clicked via set_max
+		    			if (set_max) {
+		    				curValue = window[paired_rate]['max_year'][d.id];
+		    			};	
+
+		    			county_clicked();
+		    			//curValue = oldcurValue;
+		    		})
+		    		.style( "fill" , function (d) {
+
+						//return a_color (pair_a_RateWithId[d.id]);
+						return a_color (year_a_pairedRates['avg'][d.id]);
+
+					})
+					.style("opacity", 0.8)
+					.on("mouseover", function (d) {
+
+						d3.select(this)
+							.transition()
+							.duration(300)
+							.style("opacity", 1);
+						
+							div.transition()
+							.duration(300)
+							.style("opacity", 1);
+							
+							div.text(pairNameWithId[d.id] + ": " + year_a_pairedRates['avg'][d.id]).style("left", (d3.event.pageX) + "px")
+							.style("top", (d3.event.pageY -30) + "px");
+
+					}).on("mouseout", function() {
+
+						d3.select(this).transition().duration(300).style("opacity", 0.8);
+						div.transition().duration(300).style("opacity", 0);
+
+					});
+
+		    	g.append("path")
+		    		.datum(topojson.mesh(us, us.objects.counties, function(a,b) { return a !== b; }))
+		    		.attr("id", "county-borders")
+		    		.attr("d", path);
+
+		    	g.append("path")
+		    		.datum(topojson.mesh(us, us.objects.states))//, function(a,b) { return a !== b; }))
+      				.attr("id", "state-borders")
+      				.attr("d", path);
+
+      			//Call function to create legend
+      			olmec();
+
+		    });
+
+		}
+
+		//A variable to keep track of the years we've already built objects for
+		var completed_years = ['avg','max']
+
+		//Function updates the map plot for year ('y') and watch type ('type')
+		function update_map(y,type) {
+
+			if (completed_years.includes(y)) {
+				//Do Nothing
+				//Already have the data stored in year_*_pairedRates and ready to be plotted
+				console.log('This year has already run.')
+			} else {
+
+				//Local variables to store the watch counts paired with FIPS codes
+				var pair_a_RateWithId = {};
+				var pair_t_RateWithId = {};
+				var pair_s_RateWithId = {};
+
+				table.forEach(function(d) {
+
+					//Go through the proper columns to create pairings
+					pair_t_RateWithId[d.id] = +d['t_' + y];
+					
+					pair_s_RateWithId[d.id] = +d['s_' + y];
+
+					pair_a_RateWithId[d.id] = (pair_t_RateWithId[d.id] + pair_s_RateWithId[d.id]);
+
+				});
+
+				//Move the pairings to the master dict
+				year_t_pairedRates[y] = pair_t_RateWithId;
+				year_s_pairedRates[y] = pair_s_RateWithId;
+				year_a_pairedRates[y] = pair_a_RateWithId;
+
+				//Add year to completed years so we don't run it again in the future
+				completed_years.push(y);
+
+			};
+
+			//Set up a color variable so we use the proper color function (either tor, svr, or all)
+			var color = type + '_color'
+
+			//Set this variable equal to the proper master object name
+			paired_rate = 'year_' + type + '_pairedRates'
+
+			olmec();
+
+			//Update
+			//Select all county fills
+			g.selectAll("path#fills")
+				.style( "fill" , function (d) {
+					//The reason for d.id < 60000 is to keep this block from using d.id = ~72000 which are in the topojson file. If they evaluate d.id values this high, the block breaks
+					/*if (d.id < 60000) {
+						//Change the fill color based on the values
+						return window[color] (window[paired_rate][y][d.id]);
+					};*/
+
+					//Some d.id values near ~72000 in topojson file cause an exception so we try and catch
+					try {
+						return window[color] (window[paired_rate][y][d.id]);
+					} catch (ex) {
+						//Continue block
+					};
+
+			})
+
+			//Mouseover function to make div appear to show county stats
+			.on("mouseover", function (d) {
+
+				d3.select(this)
+					.transition()
+					.duration(300)
+					.style("opacity", 1);
+				
+					div.transition()
+					.duration(300)
+					.style("opacity", 1);
+					
+				if (y == 'max') {
+					div.text(pairNameWithId[d.id] + ": (Year: " + window[paired_rate]['max_year'][d.id] + ", Total: " + window[paired_rate][y][d.id] + ")").style("left", (d3.event.pageX) + "px")
+					.style("top", (d3.event.pageY -30) + "px");
+				} else {
+					div.text(pairNameWithId[d.id] + ": " + window[paired_rate][y][d.id]).style("left", (d3.event.pageX) + "px")
+					.style("top", (d3.event.pageY -30) + "px");
+				};
+
+			});
+
+
+		};
+
+		
+		//Create a legend (of the hidden temple)
+		function olmec () {
+			var legend_labels = [0,2,4,6,8,10,12,14,16,18,'20+']
+			var ls_w = 20, ls_h = 20;
+			var color = type + '_color'
+
+			//Adding a legend
+			var legend = svg.selectAll("g.legend")
+							.data([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21])
+							.enter()
+							.append('g')
+							.attr("class","legend");
+
+			//Append a rectangle for each segment of the legend
+			legend.append('rect')
+					.attr('y',20)
+					.attr('x', function(d,i) {
+						return view_w - (24 - i)*ls_w/2 ;
+					})
+					.attr("width",ls_w/2)
+					.attr("height",ls_h)
+					.style("fill", function(d,i) {
+						return window[color] (d);
+					})
+					.style('opacity',1);
+
+			//Add text on top of the legend
+			legend.append('text')
+					.attr('y',19)
+					.attr('x', function(d,i) {
+						return view_w - (12 - i)*ls_w;
+					})
+					.text(function(d,i) {
+						return legend_labels[i];
+					});
+
+			//Update legend
+			svg.selectAll("g.legend rect")
+				.transition()
+				.duration(300)
+				.style("fill", function(d,i){
+					return window[color] (d);
+				})
+
+		}
+
+		//Pass checked radio button value to the update_map function
+		$( "input[name=type]" ).change(function() {
+  			type = $( "input[name=type]:checked" ).val();
+  			update_map(year,type);
+
+  			//Allow the year to update when toggling between watch types while max is checked
+  			if (set_max) {
+  				curValue = window[paired_rate]['max_year'][FIPS];
+  			}
+
+  			push_chart_data(curValue);
+		});
+
+		$( "input[name=options]" ).change(function() {
+
+			option = String($( "input[name=options]:checked" ).val());
+			//console.log(option);
+
+			if (option == 'avg') {
+				year = option;
+				set_max = false;
+			} else if (option == 'count') {
+				curValue = $('#slider').slider("option", "value");
+				year = curValue;
+				set_max = false;
+				//console.log(curValue);
+				push_chart_data(year);
+			} else if (option == 'max') {
+				//max();
+				year = option;
+				set_max = true;
+				curValue = window[paired_rate]['max_year'][FIPS];
+				push_chart_data(curValue);
+			}
+
+  			update_map(year,type);
+		});
+
+		$('#button').on('click', function() {
+			
+			g.transition()
+				.duration(500)
+				.attr("transform", "scale(" + 1 + ")");
+
+			//Have to reset the d3 zoom instance to translate 0,0 and scale 1 so it doesn't "jump" when re-zooming
+			//zoomy.translate([0,0]).scale(1);
+
+		});
+
+		//Function that can be used to center map on active county path. This has been disabled so the user can roam freely.
+		function clicked(d) {
+
+	    	var x, y, k;
+
+	    	//If we wanted to automatically zoom in on the active path, we would use x,y for .attr translate below.
+	    	//However, we are just using it to keep track of which path is active in current iteration of script.
+	    	var centroid = path.centroid(d);
+    		x = centroid[0];
+    		y = centroid[1];
+    		k = 6;
+
+	    	if (d && centered !== d) {
+	    		//var centroid = path.centroid(d);
+	    		//x = centroid[0];
+	    		//y = centroid[1];
+	    		//k = 4;
+	    		centered = d;
+	    	} else {
+	    		//x = view_w / 6;
+	    		//y = view_h / 2;
+	    		centered = null;
+	    	}
+
+	    	g.selectAll("path")
+	    		.classed("active", centered && function(d) { return d === centered; });
+
+	    	g.transition()
+	    		.duration(100)
+	    		.attr("transform", "translate(" + view_w/6 + "," + view_h/2  + ")scale(" + k + ")translate(" + -x + "," + -y + ")")
+	    		.style("stroke-width", 10 + "px");
+
+	    };
+
+
+	</script>
+
+	<script src='./stats_box.js'></script>
+
+</body>
